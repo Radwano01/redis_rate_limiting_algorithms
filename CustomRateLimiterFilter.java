@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.data.domain.Range;
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -23,28 +24,34 @@ public class CustomRateLimiterFilter implements GlobalFilter, Ordered {
     private static final Duration WINDOW = Duration.ofSeconds(60);
 
     @Override
-    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain){
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
 
         String ip = extractIp(exchange);
+        String key = "sliding_window:" + ip;
 
-        String key = "rate_limit: " + ip;
+        long now = System.currentTimeMillis();
+        long windowStart = now - WINDOW.toMillis();
 
-        return redisTemplate.opsForValue()
-                .increment(key)
-                .flatMap(count ->{
-                    if(count == 1){
-                        return redisTemplate.expire(key, WINDOW)
-                                .thenReturn(count);
-                    }
+        Range<Double> range = Range.closed(Double.NEGATIVE_INFINITY, (double) windowStart);
 
-                    return Mono.just(count);
-                })
+        return redisTemplate.opsForZSet()
+                // 1. remove old requests
+                .removeRangeByScore(key, range)
+
+                // 2. count remaining requests
+                .then(redisTemplate.opsForZSet().size(key))
+
                 .flatMap(count -> {
-                    if(count > LIMIT){
+
+                    if (count != null && count >= LIMIT) {
                         exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
                         return exchange.getResponse().setComplete();
                     }
-                    return chain.filter(exchange);
+
+                    // 3. add current request
+                    return redisTemplate.opsForZSet()
+                            .add(key, String.valueOf(now), now)
+                            .then(chain.filter(exchange));
                 });
     }
 

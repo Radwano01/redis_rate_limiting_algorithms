@@ -38,7 +38,7 @@ public class CustomRateLimiterFilter_TokenBucket implements GlobalFilter, Ordere
                 )
                 .flatMap(data -> {
 
-                    // 🧠 1. Load state
+                    // 1. Load state
                     double tokens = data.containsKey("tokens")
                             ? Double.parseDouble(data.get("tokens"))
                             : CAPACITY;
@@ -47,24 +47,24 @@ public class CustomRateLimiterFilter_TokenBucket implements GlobalFilter, Ordere
                             ? Long.parseLong(data.get("lastRefill"))
                             : now;
 
-                    // 🧠 2. Calculate elapsed time
+                    // 2. Calculate elapsed time
                     double elapsedSeconds = (now - lastRefill) / 1000.0;
 
-                    // 🧠 3. Refill tokens
+                    // 3. Refill tokens
                     tokens = Math.min(CAPACITY, tokens + elapsedSeconds * REFILL_RATE);
 
-                    // ❌ 4. Block if no tokens
+                    // 4. Block if no tokens
                     if (tokens < 1) {
                         exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
                         return exchange.getResponse().setComplete();
                     }
 
-                    // ✔ 5. Consume token
+                    // 5. Consume token
                     tokens -= 1;
 
                     double finalTokens = tokens;
 
-                    // 🧠 6. Save state
+                    // 6. Save state
                     return redisTemplate.opsForHash()
                             .put(key, "tokens", String.valueOf(finalTokens))
                             .then(redisTemplate.opsForHash()
